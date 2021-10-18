@@ -1,0 +1,288 @@
+---
+title: "timeseries"
+output:
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 5
+    fig_height: 4
+    theme: cosmo
+    highlight: tango
+    code_folding: show
+---
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# ARIMA {.tabset .tabset-fade}
+
+## library
+```{r}
+library(data.table)
+library(tidyverse)
+library(forecast)
+library(tseries)
+```
+
+
+## 데이터불러오기
+
+임의로 예제 데이터 하나 생성
+
+```{r}
+example <- scan('C:\\Users\\uos\\Desktop\\tutoring-\\tutoring-\\data\\timeseries\\example.txt')
+example.ts <- ts(example)
+example.ts
+```
+
+
+## plot 그려보기 (PACF, ACF 확인)
+```{r}
+ggtsdisplay(example.ts)
+```
+
+- plot을 봤을 때 정상성을 만족하지 못하는 것으로 보임.
+
+## 정상성 확인
+```{r}
+adf.test(example.ts)
+```
+- '귀무가설: 비정상시계열' 인 가설검정을 실시해 보았을 때 p-value가 0.05 보다 매우 높으므로 귀무가설 기각할 수 없음
+
+```{r}
+kpss.test(example.ts)
+```
+- '귀무가설: 정상시계열' 인 가설검정을 실시해 보았을 때 p-value가 0.05 보다 매우 높으므로 귀무가설 기각하는 증거가 된다.
+
+## 차분
+
+```{r}
+ndiffs(example.ts)
+```
+- 1차 차분을 해야 정상성 만족
+
+```{r}
+example_d <- diff(example.ts)
+example_d
+```
+
+```{r}
+ggtsdisplay(example_d)
+```
+- ACF, PACF 그림 모두 처음 lag 부터 절단점을 가짐. arima (0,1,0) 모델 활용 가능
+
+```{r}
+adf.test(example_d)
+kpss.test(example_d)
+```
+- 위의 plot과 두 가설검정 결과 정상성을 만족하는 것으로 보인다.
+
+
+## 분석
+```{r}
+auto.arima(example.ts, ic = 'bic')
+```
+
+```{r}
+fit <- Arima(example.ts, order = c(0, 1, 0), include.drift = T)
+checkresiduals(fit)
+```
+- 잔차의 ACF 그림은 모든 LAG에서 0에 가까우므로 상관관계가 없다고 보여진다.
+- 잔차의 히스토그램도 정규분포에 비슷한 모형을 띄는 것으로 보인다.
+
+- Ljung-Box test: 잔차 독립성 검정
+'lag 10차까지 자기 상관관계가 존재하지 않는다.'는 귀무가설을 기각하지 못한다.
+
+## 예측
+**Ljung-Box test에서는 잔차의 독립성 가정을 만족을 못하지만, 일단 ARIMA(0,1,0) 모델로 예측을 해보았다.**
+```{r}
+plot(forecast(fit))
+summary(forecast(fit))
+```
+- 다음 시점의 값을 신뢰구간과 함께 예측한다.
+
+
+# SARIMA {.tabset .tabset-fade}
+## 데이터 불러오기
+**데이터는 내장 데이터 AirPassengers 불러옴**
+```{r}
+data(AirPassengers)
+AirPassengers
+```
+
+## 분해시계열
+
+### 추세요인, 계절요인 불규칙요인 확인
+```{r}
+AirPassengers.decompose = decompose(AirPassengers)
+AirPassengers.decompose
+```
+
+```{r}
+plot(AirPassengers.decompose)
+```
+- 추세와 계절적 요인이  있는 것으로 보인다.
+
+### 차분, 계절차분을 얼마나 해야 정상성을 만족하는지 확인
+```{r}
+ndiffs(AirPassengers)
+nsdiffs(AirPassengers)
+```
+- 1차차분과, 계절 차분을 실시하면 정상성을 만족할 것으로 보인다.
+
+### 1차 차분, 계절 차분 실시하고 다시 PLOT 확인
+```{r}
+AirPassengers_1 <- diff(AirPassengers)
+AirPassengers_12 <- diff(AirPassengers_1,lag=12)
+ggtsdisplay(AirPassengers_12,lag.max=48)
+plot(decompose(AirPassengers_12))
+```
+
+```{r}
+adf.test(AirPassengers_12)
+kpss.test(AirPassengers_12)
+```
+- plot과 adf test , kpss test를 확인한 결과 차분을 실시한 데이터는 정상성을 만족하는 것으로 보인다.
+- ACF와 PACF 그림을 볼때, ACF는 1차 이후 절단, PACF도 2차 이후 절단된 그림을 보인다.
+- 계절적 요소인 12차에 절단된 모습을 보인다.
+- 따라서 후보 모형을 $ARIMA(1,1,0)(0,1,0)_{12}$, $ARIMA(0,1,1)(0,1,0)_{12}$, $ARIMA(1,1,1)(0,1,0)_{12}$ 로 생각할 수 있다.
+
+## 모델링
+```{r}
+auto.arima(AirPassengers,d=1,D=1,ic = 'bic')
+```
+- R에서는 auto.arima 함수를 통해 데이터에 가장 적합한 모델을 찾아줄 수 있다.
+- 여기서는 $ARIMA(1,1,0)(0,1,0)_{12}$ 이 가장 좋은 모델로 선정되었다.
+
+```{r}
+fit1 = Arima(AirPassengers, order=c(0,1,1), seasonal=list(order=c(0,1,0),period=12))
+fit1
+fit2 = Arima(AirPassengers, order=c(1,1,1), seasonal=list(order=c(0,1,0),period=12))
+fit2
+fit3 = Arima(AirPassengers, order=c(1,1,0), seasonal=list(order=c(0,1,0),period=12))
+fit3
+```
+- 원래 예상한 모델들을 다 돌려봐니 모델 적합도인 AIC와 BIC가 거의 차이가 나지 않는 모습이어서 어느 모델을 채택해도 비슷한 결과가 나올 것으로 예상된다.
+
+```{r}
+confint(fit3)
+checkresiduals(fit3)
+```
+- 가장 좋은 모델로 선정된 $ARIMA(1,1,0)(0,1,0)_{12}$ 모델을 확인해보니 잔차의 히스토그램도 정규분포와 유사하게 나오는 것 같다.  
+- Ljung-Box test 에서도 귀무가설을 기각하는 p-value가 나와서, 'lag 24차까지 자기 상관관계가 존재하지 않는다.'는 귀무가설을 기각하므로 잔차의 자기상관이 있다는 뜻이 된다. 따라서, 가정을 완벽하게 만족하는 모델이라고 볼 수는 없는 듯 하다.
+
+```{r}
+fit3_1 <- Arima(AirPassengers,order=c(0,1,1), seasonal=list(order=c(0,1,1), period=12),
+                lambda=0)
+fit3_1
+checkresiduals(fit3_1)
+```
+- plot에서 나름 분산이 일정하다고 생각했는데, 마지막 $ARIMA(1,1,0)(0,1,0)_{12}$ 모델의 plot에서 분산이 점점 커지는 것 처럼 보이기도 해서 log 변환 후 $ARIMA(1,1,0)(0,1,0)_{12}$ 모델을 적용시켜 보았는데 Ljung-Box test 에서 가정을 만족하는 결과가 나왔다. 따라서 ,이 모델을 최종으로 채택하는 것이 좋아 보인다.
+
+```{r}
+forecast(fit3_1,h=12,level=95)
+plot(forecast(fit3_1,h=12,level=95))
+summary(forecast(fit3_1,h=12,level=95))
+```
+
+# Timeseries regression {.tabset .tabset-fade}
+## 데이터 불러오기
+**데이터 출처: 데이콘 전력사용량 예측 AI 경진대회   https://dacon.io/competitions/official/235736/overview/description **
+
+** 데이콘 전력사용량 예측 데이터에서 60개의 관측소가 있는데 1개의 관측소를 가지고 시계열 분석을 해보았았다.**
+```{r}
+energy = fread('C:\\Users\\uos\\Desktop\\dacon\\data\\energy\\train.csv')
+energy = energy %>% filter(num==1)
+energy_test = fread('C:\\Users\\uos\\Desktop\\dacon\\data\\energy\\test.csv')
+energy_test = energy_test %>% filter(num==1)
+energy %>% head(10)
+energy %>% str()
+energy %>% glimpse()
+
+```
+- 먼저, 기본적으로 데이터의 구조를 살펴보았다.
+
+```{r}
+energy = energy %>%
+  mutate (hour = as.numeric(substr(date_time,12,13)),
+          date = as.Date(substr(date_time,1,10),format='%Y-%m-%d')) %>%
+  select(-c(date_time))
+
+colnames(energy) = c('num','kwh','temp','wind','humidity','rain','sun','non_electric','sunlight','hour','date')
+energy %>% glimpse()
+```
+- 데이터에서 날짜 데이터에서 시간만 따로 떼어내서 새로운 변수로 만들어주고 R에서 사용하기 편하게 영어변수로 변경해주었다.
+
+##  regression 잔차 확인
+```{r}
+attach(energy)
+energy.ts = ts(kwh)
+fit = lm(energy.ts ~ temp + wind + humidity + rain + sun + hour)
+fit
+checkresiduals(fit)
+
+```
+- factor 변수로 고정되어 있는 변수를 제외한 나머지를 linear regression하여 잔차를 체크해보고 정상성을 만족하는지 보았다. 정상성을 만족하지 못하는 것으로 보여진다.
+
+```{r}
+ndiffs(fit$residuals)
+ggtsdisplay(diff(fit$residuals))
+auto.arima(fit$residuals,ic='bic')
+```
+- ndiffs 함수로 1차 차분하면 정상성을 만족한다는 것을 확인하고 1차 차분을 진행하였다.
+- 차분한 데이터로 plot과 ACF,PACF 그림을 보았을때, ARIMA(2,1,0), ARIMA(0,1,1), ARIMA(2,1,1) 모델을 후보군으로 생각 할 수 있었다.
+- auto.arima 함수를 이용하여 확인하여 보니 ARIMA(2,1,1) 모델이 가장 적합한 모델로 선정되었다.
+
+## 데이터 모델링
+```{r}
+energy_x = energy %>% select(-c(kwh,date,num,sunlight,non_electric))
+f1 = Arima(energy.ts, order = c(2, 1, 1), xreg = as.matrix(energy_x))
+f1
+
+plot(f1$fitted)
+lines(energy.ts,col='red')
+detach(energy)
+```
+- ARIMA(2,1,1) 에 Regression을 더한 모델을 적합해보았고 plot을 그려 예측치와 실제값을 비교해보았다.
+
+## 예측
+```{r}
+energy_test%>%glimpse()
+energy_test%>%head(10)
+energy_test%>%is.na()%>%colSums()
+```
+- test set을 확인해보니 결측치가 많은 것이 눈에 띄었다.
+
+```{r}
+energy_test = energy_test %>%
+  mutate (hour = as.numeric(substr(date_time,12,13)),
+          date = as.Date(substr(date_time,1,10),format='%Y-%m-%d')) %>%
+  select(-c(date_time))
+
+colnames(energy_test) = c('num','temp','wind','humidity','rain','sun','non_electric','sunlight','hour','date')
+
+energy_test$non_electric = ifelse(is.na(energy_test$non_electric),0,energy_test$non_electric)
+energy_test$sunlight = ifelse(is.na(energy_test$sunlight),0,energy_test$sunlight)
+
+energy_test = zoo::na.locf(energy_test)
+
+energy_test %>% is.na() %>% colSums()
+energy_test %>% head(10)
+```
+- 일조량과 태양광보유 변수 결측치에는 0을 넣어주고 나머지 변수들의 결측치는 앞의 데이터를 뒤의 결측치에 넣어주는 방식으로 결측치 대체를 하였다.
+
+```{r}
+energy_test_x = energy_test[,-c('date','num','sunlight','non_electric')]
+forecast(f1,xreg = as.matrix(energy_test_x),level=95)
+plot(forecast(f1,xreg = as.matrix(energy_test_x),level =95))
+```
+- 이를 토대로 앞의 모델로 95% 신뢰구간과 함께 test set을 예측해보았다.
+
+```{r}
+accuracy(f1)
+```
+
+
